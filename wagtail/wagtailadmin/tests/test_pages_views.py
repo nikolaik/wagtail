@@ -18,12 +18,15 @@ from django.http import HttpRequest, HttpResponse
 from django.test import TestCase, modify_settings
 from django.utils import formats, timezone
 from django.utils.dateparse import parse_date
+
+from freezegun import freeze_time
 from wagtail.tests.testapp.models import (
     EVENT_AUDIENCE_CHOICES, Advert, AdvertPlacement, BusinessChild, BusinessIndex, BusinessSubIndex,
     DefaultStreamPage, EventCategory, EventPage, EventPageCarouselItem, FilePage, SimplePage,
     SingleEventPage, SingletonPage, StandardChild, StandardIndex, TaggedPage)
 from wagtail.tests.utils import WagtailTestUtils
 from wagtail.wagtailadmin.views.home import RecentEditsPanel
+from wagtail.wagtailadmin.views.pages import PreviewOnEdit
 from wagtail.wagtailcore.models import GroupPagePermission, Page, PageRevision, Site
 from wagtail.wagtailcore.signals import page_published, page_unpublished
 from wagtail.wagtailsearch.index import SearchField
@@ -4300,3 +4303,30 @@ class TestPreview(TestCase, WagtailTestUtils):
         self.assertContains(response, "Beach party")
         self.assertContains(response, "<li>Parties</li>")
         self.assertContains(response, "<li>Holidays</li>")
+
+    def test_preview_on_edit_expiry(self):
+        initial_datetime = timezone.now()
+        expiry_datetime = initial_datetime + datetime.timedelta(
+            seconds=PreviewOnEdit.preview_expiration_timeout + 1)
+
+        with freeze_time(initial_datetime) as frozen_datetime:
+            preview_url = reverse('wagtailadmin_pages:preview_on_edit',
+                                  args=(self.event_page.id,))
+            response = self.client.post(preview_url, self.post_data)
+
+            # Check the JSON response
+            self.assertEqual(response.status_code, 200)
+
+            response = self.client.get(preview_url)
+
+            # Check the HTML response
+            self.assertEqual(response.status_code, 200)
+
+            frozen_datetime.move_to(expiry_datetime)
+
+            preview_url = reverse('wagtailadmin_pages:preview_on_edit',
+                                  args=(self.home_page.id,))
+            response = self.client.post(preview_url, self.post_data)
+            self.assertEqual(response.status_code, 200)
+            response = self.client.get(preview_url)
+            self.assertEqual(response.status_code, 200)
